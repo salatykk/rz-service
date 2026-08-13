@@ -10,13 +10,13 @@ if (-not (Test-Path ".venv")) {
 
 .\.venv\Scripts\python.exe selftest.py
 
-.\.venv\Scripts\python.exe make_icon.py
+.\.venv\Scripts\python.exe convert_icon.py
 
 .\.venv\Scripts\pyinstaller.exe --noconfirm --clean --onefile --windowed `
-    --name "RZ Service" --icon icon.ico app_service.py
+    --name "RZ Service" --icon icon.ico --add-data "icon.png;." --add-data "icon.ico;." app_service.py
 
 .\.venv\Scripts\pyinstaller.exe --noconfirm --clean --onefile --windowed `
-    --name "RZ unzip" --icon icon.ico app_unzip.py
+    --name "RZ unzip" --icon icon.ico --add-data "icon.png;." --add-data "icon.ico;." app_unzip.py
 
 Write-Host ""
 Write-Host "Готово! Исполняемые файлы:"

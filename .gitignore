@@ -11,3 +11,8 @@ dist/
 
 # Generated
 icon.ico
+
+# Private crypto core (not published)
+rzservice/crypto.py
+rzservice/archive.py
+selftest.py

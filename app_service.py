@@ -1,24 +1,33 @@
 import os
 import queue
+import string
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import messagebox, ttk
 
 import customtkinter as ctk
 
 from rzservice import archive, crypto, password_strength
-from rzservice.uiutil import format_size
+from rzservice.uiutil import format_size, resource_path
+
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
 
 APP_NAME = "RZ Service"
-ACCENT = "#2f6bb0"
-ACCENT_HOVER = "#3a7fcf"
-DANGER = "#a33a3a"
-CARD_BG = "#1a2430"
-DIVIDER = "#2c3c50"
-SUBTITLE = "#7f9db9"
-SECTION = "#9fd0ff"
-
-FMT_LABELS = {"zip": "ZIP", "rar": "RAR"}
+BG_WINDOW = "#2b2b2b"
+BG_CARD = "#222222"
+BG_TREE = "#1e1e1e"
+TEXT = "#e6e6e6"
+MUTED = "#9aa0a6"
+FOLDER = "#f5a742"
+FILE_C = "#c9c9c9"
+ACCENT = "#3d7bd1"
+ACCENT_HOVER = "#4f8ee6"
+DANGER = "#b04a4a"
+SECTION = "#8ab4f8"
+DUMMY_SUFFIX = "__rz_dummy__"
 
 
 def count_dir(path):
@@ -34,14 +43,22 @@ def count_dir(path):
     return n, size
 
 
+def get_drives():
+    drives = []
+    for letter in string.ascii_uppercase:
+        path = f"{letter}:\\"
+        if os.path.exists(path):
+            drives.append(path)
+    return drives
+
+
 class RZServiceApp:
     def __init__(self):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
-        self.root = ctk.CTk()
+        self.root = ctk.CTk(fg_color=BG_WINDOW)
         self.root.title(f"{APP_NAME} — супер-защищённые архивы ZIP и RAR")
-        self.root.minsize(820, 600)
-        self.root.resizable(False, False)
+        self.root.minsize(980, 640)
 
         self.q = queue.Queue()
         self.worker = None
@@ -51,18 +68,20 @@ class RZServiceApp:
         self.rar_ok = bool(archive.find_rar())
 
         self.src_path = tk.StringVar()
-        self.out_path = tk.StringVar()
         self.password = tk.StringVar()
         self.password2 = tk.StringVar()
         self.delete_src = tk.BooleanVar(value=False)
         self.fmt = "zip"
+        self.out_auto = ""
 
-        self.src_info = tk.StringVar(value="Выберите папку или файл для шифрования")
+        self.src_info = tk.StringVar(value="")
         self.strength_text = tk.StringVar(value="Пароль не задан")
-        self.status_text = tk.StringVar(value="Готов к работе")
+        self.status_text = tk.StringVar(value="Выберите папку в проводнике")
+        self._stats_seq = 0
 
         self._build_ui()
-        self._center_window(880, 660)
+        self._set_window_icon()
+        self._center_window(1100, 700)
         self.password.trace_add("write", self._on_password_change)
         self.root.after(100, self._poll_queue)
 
@@ -72,192 +91,332 @@ class RZServiceApp:
         y = max(0, (self.root.winfo_screenheight() - h) // 3)
         self.root.geometry(f"{w}x{h}+{x}+{y}")
 
-    def _section(self, parent, text, row):
-        ctk.CTkLabel(parent, text=text,
-                     font=ctk.CTkFont("Segoe UI", 12, "bold"),
-                     text_color=SECTION).grid(row=row, column=0, columnspan=3,
-                                              sticky="w", padx=22, pady=(14, 6))
+    def _set_window_icon(self):
+        try:
+            self.root.iconbitmap(resource_path("icon.ico"))
+        except Exception:
+            pass
 
-    def _divider(self, parent, row):
-        ctk.CTkFrame(parent, height=1, fg_color=DIVIDER).grid(
-            row=row, column=0, columnspan=3, sticky="ew", padx=22, pady=2)
+    def _load_icon(self, size):
+        if Image is None:
+            return None
+        try:
+            img = Image.open(resource_path("icon.png"))
+            return ctk.CTkImage(light_image=img, dark_image=img,
+                                size=(size, size))
+        except Exception:
+            return None
 
     def _build_ui(self):
         root = self.root
         root.grid_columnconfigure(0, weight=1)
-        root.grid_rowconfigure(1, weight=1)
+        root.grid_rowconfigure(0, weight=1)
 
-        header = ctk.CTkFrame(root, corner_radius=0, fg_color="#16202b", height=64)
-        header.grid(row=0, column=0, sticky="ew")
-        header.grid_propagate(False)
-        header.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(header, text=APP_NAME,
-                     font=ctk.CTkFont("Segoe UI", 24, "bold"),
-                     text_color="#ffffff").grid(row=0, column=0,
-                                                padx=(20, 6), pady=(10, 0), sticky="w")
-        ctk.CTkLabel(header, text="Супер-защищённые архивы ZIP и RAR",
-                     font=ctk.CTkFont("Segoe UI", 12),
-                     text_color=SUBTITLE).grid(row=1, column=0,
-                                               padx=(22, 6), pady=(0, 8), sticky="w")
-        ctk.CTkButton(header, text="?", width=34, height=34, corner_radius=17,
-                      fg_color="transparent", border_width=1,
-                      command=self._about).grid(row=0, column=1, rowspan=2,
-                                                padx=16, sticky="e")
+        main = ctk.CTkFrame(root, corner_radius=0, fg_color="transparent")
+        main.grid(row=0, column=0, sticky="nsew")
+        main.grid_columnconfigure(0, minsize=300)
+        main.grid_columnconfigure(1, weight=1)
+        main.grid_rowconfigure(0, weight=1)
 
-        card = ctk.CTkFrame(root, corner_radius=16, fg_color=CARD_BG)
-        card.grid(row=1, column=0, sticky="nsew", padx=16, pady=(14, 2))
-        card.grid_columnconfigure(1, weight=1)
-        card.grid_columnconfigure(0, minsize=140)
+        self._build_left(main)
+        self._build_right(main)
 
-        self._section(card, "1 · ЧТО ЗАШИФРОВАТЬ", 0)
-        self.path_box = ctk.CTkTextbox(card, height=62,
-                                       font=ctk.CTkFont("Segoe UI", 12),
-                                       wrap="word", state="disabled", corner_radius=10)
-        self.path_box.grid(row=1, column=0, columnspan=3, sticky="ew",
-                           padx=22, pady=2)
-        self.path_box.configure(state="normal")
-        self.path_box.insert("1.0", "Папка или файл не выбраны")
-        self.path_box.configure(state="disabled")
-        row2 = ctk.CTkFrame(card, fg_color="transparent")
-        row2.grid(row=2, column=0, columnspan=3, sticky="ew", padx=22, pady=(8, 0))
-        row2.grid_columnconfigure(2, weight=1)
-        self.btn_folder = ctk.CTkButton(row2, text="Выбрать папку…", width=150,
-                                        height=36, command=self._pick_folder)
-        self.btn_folder.grid(row=0, column=0, padx=(0, 8))
-        self.btn_file = ctk.CTkButton(row2, text="Выбрать файл…", width=140,
-                                      height=36, command=self._pick_file)
-        self.btn_file.grid(row=0, column=1, padx=(0, 8))
-        ctk.CTkLabel(row2, textvariable=self.src_info, font=ctk.CTkFont("Segoe UI", 12),
-                     text_color=SUBTITLE, justify="right").grid(row=0, column=2,
-                                                                sticky="e")
+    def _build_left(self, main):
+        left = ctk.CTkFrame(main, corner_radius=0, fg_color="transparent", width=300)
+        left.grid(row=0, column=0, sticky="nsew", padx=(16, 6), pady=16)
+        left.grid_propagate(False)
+        left.grid_columnconfigure(0, weight=1)
+        left.grid_rowconfigure(2, weight=1)
 
-        self._divider(card, 3)
-
-        self._section(card, "2 · ПАРОЛЬ", 4)
-        ctk.CTkLabel(card, text="Пароль", font=ctk.CTkFont("Segoe UI", 13)).grid(
-            row=5, column=0, sticky="w", padx=22, pady=4)
-        self.ent_pw = ctk.CTkEntry(card, textvariable=self.password, show="*")
-        self.ent_pw.grid(row=5, column=1, sticky="ew", padx=(4, 8), pady=4)
-        self.btn_show = ctk.CTkButton(card, text="Показать", width=90, height=34,
-                                      command=self._toggle_show)
-        self.btn_show.grid(row=5, column=2, sticky="w", padx=(0, 22), pady=4)
-        ctk.CTkLabel(card, text="Повтор", font=ctk.CTkFont("Segoe UI", 13)).grid(
-            row=6, column=0, sticky="w", padx=22, pady=4)
-        self.ent_pw2 = ctk.CTkEntry(card, textvariable=self.password2, show="*")
-        self.ent_pw2.grid(row=6, column=1, columnspan=2, sticky="ew",
-                          padx=(4, 22), pady=4)
-        self.strength_bar = ctk.CTkProgressBar(card, height=6,
-                                               progress_color="#2ecc71")
-        self.strength_bar.set(0)
-        self.strength_bar.grid(row=7, column=0, columnspan=3, sticky="ew",
-                               padx=22, pady=(10, 0))
-        ctk.CTkLabel(card, textvariable=self.strength_text,
+        brand = ctk.CTkFrame(left, corner_radius=16, fg_color=BG_CARD)
+        brand.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        brand.grid_columnconfigure(1, weight=1)
+        icon = self._load_icon(52)
+        if icon is not None:
+            ctk.CTkLabel(brand, image=icon, text="").grid(
+                row=0, column=0, rowspan=2, padx=(16, 4), pady=12, sticky="w")
+            self._brand_icon = icon
+        ctk.CTkLabel(brand, text=APP_NAME,
+                     font=ctk.CTkFont("Segoe UI", 22, "bold"),
+                     text_color=TEXT).grid(row=0, column=1, padx=(4, 16),
+                                           pady=(14, 0), sticky="w")
+        ctk.CTkLabel(brand, text="Супер-защищённые архивы\nZIP и RAR",
                      font=ctk.CTkFont("Segoe UI", 11),
-                     text_color=SUBTITLE).grid(row=8, column=0, columnspan=3,
-                                               sticky="w", padx=22, pady=(2, 0))
+                     text_color=MUTED).grid(row=1, column=1, padx=(4, 16),
+                                            pady=(0, 12), sticky="w")
 
-        self._divider(card, 9)
+        info = ctk.CTkFrame(left, corner_radius=16, fg_color=BG_CARD)
+        info.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        ctk.CTkLabel(info, text="Как это работает",
+                     font=ctk.CTkFont("Segoe UI", 12, "bold"),
+                     text_color=SECTION).pack(anchor="w", padx=16, pady=(12, 4))
+        for line in ("1. Выберите папку в проводнике",
+                     "2. Укажите формат и пароль",
+                     "3. Нажмите «Архивировать»",
+                     "",
+                     "Файл .rzx невозможно открыть без пароля — "
+                     "ни Windows, ни WinRAR, ни 7-Zip."):
+            ctk.CTkLabel(info, text=line, font=ctk.CTkFont("Segoe UI", 11),
+                         text_color=MUTED, justify="left", anchor="w").pack(
+                anchor="w", padx=16, pady=0)
+        ctk.CTkLabel(info, text="", height=8).pack()
 
-        self._section(card, "3 · ФОРМАТ И СОХРАНЕНИЕ", 10)
-        ctk.CTkLabel(card, text="Формат", font=ctk.CTkFont("Segoe UI", 13)).grid(
-            row=11, column=0, sticky="w", padx=22, pady=4)
-        seg_values = ["ZIP", "RAR"] if self.rar_ok else ["ZIP"]
-        self.seg_fmt = ctk.CTkSegmentedButton(card, values=seg_values,
-                                              command=self._on_fmt,
-                                              height=36)
-        self.seg_fmt.set("ZIP")
-        self.seg_fmt.grid(row=11, column=1, sticky="w", padx=(4, 8), pady=4)
-        fmt_hint = ("Установите WinRAR для формата RAR" if not self.rar_ok
-                    else "Внутри — ZIP/RAR, снаружи — AES-256-GCM")
-        ctk.CTkLabel(card, text=fmt_hint, font=ctk.CTkFont("Segoe UI", 11),
-                     text_color=SUBTITLE).grid(row=11, column=2, sticky="w",
-                                               padx=(0, 22), pady=4)
-        ctk.CTkLabel(card, text="Сохранить", font=ctk.CTkFont("Segoe UI", 13)).grid(
-            row=12, column=0, sticky="w", padx=22, pady=4)
-        self.ent_out = ctk.CTkEntry(card, textvariable=self.out_path,
-                                    placeholder_text="Путь к защищённому файлу .rzx")
-        self.ent_out.grid(row=12, column=1, sticky="ew", padx=(4, 8), pady=4)
-        ctk.CTkButton(card, text="…", width=36, height=34,
-                      command=self._pick_output).grid(row=12, column=2,
-                                                      sticky="w", padx=(0, 22),
-                                                      pady=4)
-        self.chk_delete = ctk.CTkCheckBox(
-            card, text="Удалить исходные данные после успешного шифрования",
-            variable=self.delete_src, font=ctk.CTkFont("Segoe UI", 12))
-        self.chk_delete.grid(row=13, column=0, columnspan=3, sticky="w",
-                             padx=22, pady=(10, 18))
-
-        footer = ctk.CTkFrame(root, corner_radius=0, fg_color="#141c25")
-        footer.grid(row=2, column=0, sticky="ew")
+        footer = ctk.CTkFrame(left, corner_radius=0, fg_color="transparent")
+        footer.grid(row=3, column=0, sticky="ew")
         footer.grid_columnconfigure(0, weight=1)
         self.status = ctk.CTkLabel(footer, textvariable=self.status_text,
-                                   font=ctk.CTkFont("Segoe UI", 12),
-                                   text_color="#9fb6cd", anchor="w")
-        self.status.grid(row=0, column=0, sticky="ew", padx=18, pady=(12, 4))
-        self.btn_cancel = ctk.CTkButton(footer, text="Отмена", width=110, height=40,
-                                        fg_color=DANGER, hover_color="#8a2f2f",
-                                        command=self._cancel, state="disabled")
-        self.btn_cancel.grid(row=0, column=1, padx=(0, 10), pady=8)
-        self.btn_go = ctk.CTkButton(footer, text="", width=270, height=40,
-                                    fg_color=ACCENT, hover_color=ACCENT_HOVER,
-                                    font=ctk.CTkFont("Segoe UI", 14, "bold"),
-                                    command=self._start)
-        self.btn_go.grid(row=0, column=2, padx=(0, 18), pady=8)
-        self.progress = ctk.CTkProgressBar(footer, height=5)
-        self.progress.grid(row=1, column=0, columnspan=3, sticky="ew")
+                                   font=ctk.CTkFont("Segoe UI", 11),
+                                   text_color=MUTED, anchor="w",
+                                   justify="left", wraplength=280)
+        self.status.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        self.progress = ctk.CTkProgressBar(footer, height=6)
         self.progress.set(0)
-        self._update_go_text()
+        self.progress.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        self.btn_cancel = ctk.CTkButton(footer, text="Отмена", height=36,
+                                        fg_color=DANGER, hover_color="#8e3a3a",
+                                        command=self._cancel, state="disabled")
+        self.btn_cancel.grid(row=2, column=0, sticky="ew")
+
+    def _build_right(self, main):
+        right = ctk.CTkFrame(main, corner_radius=0, fg_color="transparent")
+        right.grid(row=0, column=1, sticky="nsew", padx=(6, 16), pady=16)
+        right.grid_columnconfigure(0, weight=1)
+        right.grid_rowconfigure(0, weight=1)
+
+        explorer = ctk.CTkFrame(right, corner_radius=16, fg_color=BG_TREE)
+        explorer.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
+        explorer.grid_columnconfigure(0, weight=1)
+        explorer.grid_rowconfigure(1, weight=1)
+
+        exp_head = ctk.CTkFrame(explorer, fg_color="transparent")
+        exp_head.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 4))
+        exp_head.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(exp_head, text="Проводник",
+                     font=ctk.CTkFont("Segoe UI", 14, "bold"),
+                     text_color=TEXT).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(exp_head, text="выберите папку или файл",
+                     font=ctk.CTkFont("Segoe UI", 11),
+                     text_color=MUTED).grid(row=0, column=1, sticky="w",
+                                            padx=(10, 0), pady=(2, 0))
+
+        holder = ctk.CTkFrame(explorer, fg_color="transparent")
+        holder.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        holder.grid_columnconfigure(0, weight=1)
+        holder.grid_rowconfigure(0, weight=1)
+
+        style = ttk.Style(self.root)
+        style.theme_use("clam")
+        style.configure("Explorer.Treeview",
+                        background=BG_TREE,
+                        fieldbackground=BG_TREE,
+                        foreground=TEXT,
+                        rowheight=26,
+                        borderwidth=0,
+                        indent=18,
+                        font=("Segoe UI", 11))
+        style.map("Explorer.Treeview",
+                  background=[("selected", ACCENT)],
+                  foreground=[("selected", "#ffffff")])
+        self.tree = ttk.Treeview(holder, show="tree", selectmode="browse",
+                                 style="Explorer.Treeview")
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        self.tree.tag_configure("dir", foreground=FOLDER)
+        self.tree.tag_configure("file", foreground=FILE_C)
+        vsb = ttk.Scrollbar(holder, orient="vertical", command=self.tree.yview)
+        vsb.grid(row=0, column=1, sticky="ns")
+        self.tree.configure(yscrollcommand=vsb.set)
+        hsb = ttk.Scrollbar(holder, orient="horizontal", command=self.tree.xview)
+        hsb.grid(row=1, column=0, sticky="ew")
+        self.tree.configure(xscrollcommand=hsb.set)
+
+        self.tree.bind("<<TreeviewOpen>>", self._on_open)
+        self.tree.bind("<<TreeviewSelect>>", self._on_select)
+        self._load_drives()
+
+        arc = ctk.CTkFrame(right, corner_radius=16, fg_color=BG_CARD)
+        arc.grid(row=1, column=0, sticky="ew")
+        arc.grid_columnconfigure(1, weight=1)
+        arc.grid_columnconfigure(0, minsize=130)
+
+        ctk.CTkLabel(arc, text="Архивация",
+                     font=ctk.CTkFont("Segoe UI", 14, "bold"),
+                     text_color=TEXT).grid(row=0, column=0, sticky="w",
+                                           padx=16, pady=(14, 4))
+        ctk.CTkButton(arc, text="?", width=30, height=30, corner_radius=15,
+                      fg_color="transparent", border_width=1,
+                      command=self._about).grid(row=0, column=2, sticky="e",
+                                                padx=(0, 16), pady=(10, 0))
+
+        ctk.CTkLabel(arc, text="Папка:", font=ctk.CTkFont("Segoe UI", 12)).grid(
+            row=1, column=0, sticky="w", padx=16, pady=4)
+        self.path_label = ctk.CTkLabel(arc, text="Папка не выбрана",
+                                       font=ctk.CTkFont("Segoe UI", 12),
+                                       text_color=TEXT, anchor="w",
+                                       justify="left", wraplength=400)
+        self.path_label.grid(row=1, column=1, columnspan=2, sticky="ew",
+                             padx=(4, 16), pady=4)
+        ctk.CTkLabel(arc, textvariable=self.src_info,
+                     font=ctk.CTkFont("Segoe UI", 11),
+                     text_color=MUTED).grid(row=2, column=1, columnspan=2,
+                                            sticky="w", padx=(4, 16), pady=(0, 2))
+
+        ctk.CTkLabel(arc, text="Формат:", font=ctk.CTkFont("Segoe UI", 12)).grid(
+            row=3, column=0, sticky="w", padx=16, pady=4)
+        fmt_values = ["ZIP", "RAR"] if self.rar_ok else ["ZIP"]
+        self.menu_fmt = ctk.CTkOptionMenu(arc, values=fmt_values,
+                                          command=self._on_fmt, height=34,
+                                          width=130)
+        self.menu_fmt.set("ZIP")
+        self.menu_fmt.grid(row=3, column=1, sticky="w", padx=(4, 8), pady=4)
+        ctk.CTkLabel(arc, text=("Установите WinRAR для формата RAR"
+                                if not self.rar_ok
+                                else "ZIP встроен · RAR через WinRAR"),
+                     font=ctk.CTkFont("Segoe UI", 11),
+                     text_color=MUTED).grid(row=3, column=2, sticky="w",
+                                            padx=(0, 16), pady=4)
+
+        ctk.CTkLabel(arc, text="Пароль:", font=ctk.CTkFont("Segoe UI", 12)).grid(
+            row=4, column=0, sticky="w", padx=16, pady=4)
+        self.ent_pw = ctk.CTkEntry(arc, textvariable=self.password, show="*")
+        self.ent_pw.grid(row=4, column=1, sticky="ew", padx=(4, 8), pady=4)
+        self.btn_show = ctk.CTkButton(arc, text="Показать", width=88, height=32,
+                                      command=self._toggle_show)
+        self.btn_show.grid(row=4, column=2, sticky="w", padx=(0, 16), pady=4)
+
+        ctk.CTkLabel(arc, text="Повтор:", font=ctk.CTkFont("Segoe UI", 12)).grid(
+            row=5, column=0, sticky="w", padx=16, pady=4)
+        self.ent_pw2 = ctk.CTkEntry(arc, textvariable=self.password2, show="*")
+        self.ent_pw2.grid(row=5, column=1, columnspan=2, sticky="ew",
+                          padx=(4, 16), pady=4)
+
+        self.strength_bar = ctk.CTkProgressBar(arc, height=5,
+                                               progress_color="#2ecc71")
+        self.strength_bar.set(0)
+        self.strength_bar.grid(row=6, column=0, columnspan=3, sticky="ew",
+                               padx=16, pady=(8, 0))
+        ctk.CTkLabel(arc, textvariable=self.strength_text,
+                     font=ctk.CTkFont("Segoe UI", 11),
+                     text_color=MUTED).grid(row=7, column=0, columnspan=3,
+                                            sticky="w", padx=16, pady=(0, 2))
+
+        self.chk_delete = ctk.CTkCheckBox(
+            arc, text="Удалить исходные данные после архивации",
+            variable=self.delete_src, font=ctk.CTkFont("Segoe UI", 11))
+        self.chk_delete.grid(row=8, column=0, columnspan=3, sticky="w",
+                             padx=16, pady=(6, 4))
+
+        self.btn_go = ctk.CTkButton(arc, text="Архивировать", height=42,
+                                    fg_color=ACCENT, hover_color=ACCENT_HOVER,
+                                    font=ctk.CTkFont("Segoe UI", 15, "bold"),
+                                    command=self._start)
+        self.btn_go.grid(row=9, column=0, columnspan=3, sticky="ew",
+                         padx=16, pady=(8, 16))
 
         self.ent_pw.bind("<Return>", lambda e: self._start())
         self.ent_pw2.bind("<Return>", lambda e: self._start())
 
-    def _update_go_text(self):
-        self.btn_go.configure(text=f"Создать защищённый {FMT_LABELS[self.fmt]}-архив")
+    def _load_drives(self):
+        for drive in get_drives():
+            node = self.tree.insert("", "end", iid=drive, text=drive,
+                                    tags=("dir",))
+            self._add_dummy(node)
 
-    def _on_fmt(self, value):
-        self.fmt = value.lower()
-        self._update_go_text()
+    @staticmethod
+    def _dummy_of(path):
+        return path + DUMMY_SUFFIX
 
-    def _pick_folder(self):
-        path = filedialog.askdirectory(title="Выберите папку для шифрования")
-        if path:
-            self._set_path(path)
+    def _add_dummy(self, node):
+        try:
+            self.tree.insert(node, "end", iid=self._dummy_of(node), text="")
+        except tk.TclError:
+            pass
 
-    def _pick_file(self):
-        path = filedialog.askopenfilename(title="Выберите файл для шифрования")
-        if path:
-            self._set_path(path)
+    def _maybe_expand(self, item):
+        if not item or not self.tree.exists(item):
+            return
+        children = self.tree.get_children(item)
+        if len(children) == 1 and children[0] == self._dummy_of(item):
+            try:
+                self.tree.delete(children[0])
+            except tk.TclError:
+                pass
+            self._load_children(item)
 
-    def _pick_output(self):
-        initial = self.out_path.get() or os.path.join(os.path.expanduser("~"), "archive.rzx")
-        path = filedialog.asksaveasfilename(
-            title="Куда сохранить защищённый архив",
-            defaultextension=".rzx",
-            initialfile=os.path.basename(initial) if initial else "archive.rzx",
-            initialdir=os.path.dirname(initial) or os.path.expanduser("~"),
-            filetypes=[("RZ Service контейнер", "*.rzx")])
-        if path:
-            self.out_path.set(path)
+    def _load_children(self, item):
+        try:
+            entries = sorted(os.scandir(item),
+                             key=lambda e: (not e.is_dir(), e.name.lower()))
+        except OSError:
+            return
+        for entry in entries:
+            try:
+                is_dir = entry.is_dir()
+            except OSError:
+                continue
+            if is_dir:
+                child = self.tree.insert(item, "end", iid=entry.path,
+                                         text=entry.name, tags=("dir",))
+                self._add_dummy(child)
+            else:
+                self.tree.insert(item, "end", iid=entry.path,
+                                 text=entry.name, tags=("file",))
+
+    def _on_open(self, _event):
+        item = self.tree.focus()
+        if item:
+            self._maybe_expand(item)
+        for sel in self.tree.selection():
+            self._maybe_expand(sel)
+
+    def _on_select(self, _event):
+        sel = self.tree.selection()
+        if not sel:
+            return
+        item = sel[0]
+        if not item or item.endswith(DUMMY_SUFFIX):
+            return
+        if os.path.isdir(item) or os.path.isfile(item):
+            self._set_path(item)
+        self._maybe_expand(item)
 
     def _set_path(self, path):
         self.src_path.set(path)
         if os.path.isfile(path):
-            size = os.path.getsize(path)
-            self.src_info.set(f"Файл · {format_size(size)}")
-            name = os.path.splitext(os.path.basename(path))[0]
+            try:
+                self.src_info.set(f"Файл · {format_size(os.path.getsize(path))}")
+            except OSError:
+                self.src_info.set("Файл")
         elif os.path.isdir(path):
-            n, size = count_dir(path)
-            self.src_info.set(f"Папка · файлов {n} · {format_size(size)}")
-            name = os.path.basename(os.path.normpath(path))
+            self.src_info.set("Подсчёт размера…")
+            self._schedule_stats(path)
         else:
             return
-        self.path_box.configure(state="normal")
-        self.path_box.delete("1.0", "end")
-        self.path_box.insert("1.0", path)
-        self.path_box.configure(state="disabled")
-        if not self.out_path.get():
-            base_dir = os.path.dirname(os.path.abspath(path))
-            self.out_path.set(os.path.join(base_dir, name + ".rzx"))
+        self.path_label.configure(text=path)
+        self.out_auto = self._default_output(path)
+
+    def _schedule_stats(self, path):
+        self._stats_seq += 1
+        seq = self._stats_seq
+        threading.Thread(target=self._count_stats, args=(path, seq),
+                         daemon=True).start()
+
+    def _count_stats(self, path, seq):
+        n, size = count_dir(path)
+        self.q.put(("stats", seq, n, size))
+
+    @staticmethod
+    def _default_output(src):
+        if os.path.isfile(src):
+            name = os.path.splitext(os.path.basename(src))[0]
+            folder = os.path.dirname(src)
+        else:
+            base = os.path.normpath(src)
+            name = os.path.basename(base)
+            folder = os.path.dirname(base)
+        return os.path.join(folder, name + ".rzx")
+
+    def _on_fmt(self, value):
+        self.fmt = value.lower()
 
     def _toggle_show(self):
         show = self.ent_pw.cget("show") == ""
@@ -278,24 +437,16 @@ class RZServiceApp:
 
     def _validate(self):
         src = self.src_path.get().strip()
-        out = self.out_path.get().strip()
+        if not src or not (os.path.isfile(src) or os.path.isdir(src)):
+            messagebox.showerror(APP_NAME, "Выберите папку или файл в проводнике.")
+            return None
+        out = self.out_auto or self._default_output(src)
+        fmt = self.fmt
         pw = self.password.get()
         pw2 = self.password2.get()
-        fmt = self.fmt
-        if not src or not (os.path.isfile(src) or os.path.isdir(src)):
-            messagebox.showerror(APP_NAME, "Выберите существующий файл или папку.")
-            return None
         if fmt == "rar" and not self.rar_ok:
             messagebox.showerror(APP_NAME, "Для формата RAR требуется WinRAR. "
                                            "Установите WinRAR или выберите ZIP.")
-            return None
-        if not out:
-            messagebox.showerror(APP_NAME, "Укажите путь для сохранения файла.")
-            return None
-        if not out.lower().endswith(".rzx"):
-            out += ".rzx"
-        if os.path.abspath(out) == os.path.abspath(src):
-            messagebox.showerror(APP_NAME, "Путь сохранения совпадает с исходными данными.")
             return None
         if len(pw) < 4:
             messagebox.showerror(APP_NAME, "Пароль слишком короткий (минимум 4 символа).")
@@ -310,10 +461,8 @@ class RZServiceApp:
         if self.delete_src.get():
             if not messagebox.askyesno(
                     APP_NAME,
-                    "Исходные данные будут удалены после успешного шифрования.\n\n"
-                    "Продолжить?"):
+                    "Исходные данные будут удалены после архивации.\n\nПродолжить?"):
                 self.delete_src.set(False)
-        self.out_path.set(out)
         return src, out, pw, fmt
 
     def _start(self):
@@ -378,11 +527,11 @@ class RZServiceApp:
     def _set_busy(self, busy):
         self.busy = busy
         state = "disabled" if busy else "normal"
-        for widget in (self.btn_folder, self.btn_file, self.ent_out,
-                       self.ent_pw, self.ent_pw2, self.chk_delete, self.seg_fmt):
+        for widget in (self.ent_pw, self.ent_pw2, self.chk_delete,
+                       self.menu_fmt, self.btn_go):
             widget.configure(state=state)
+        self.tree.state(["disabled"] if busy else ["!disabled"])
         self.btn_cancel.configure(state="normal" if busy else "disabled")
-        self.btn_go.configure(state=state)
 
     def _poll_queue(self):
         try:
@@ -402,15 +551,20 @@ class RZServiceApp:
             _, stats = msg
             self._set_busy(False)
             self.progress.set(1)
-            lines = [f"Защищённый {FMT_LABELS.get(stats['fmt'], '')}-архив создан!",
-                     f"Файлов: {stats['files']} · размер данных: {format_size(stats['size'])}",
-                     f"\nФайл: {self.out_path.get()}",
+            lines = ["Защищённый архив создан!",
+                     f"Файлов: {stats['files']} · "
+                     f"размер данных: {format_size(stats['size'])}",
+                     f"\nФайл: {self.out_auto}",
                      "\nОткрыть его можно только в программе RZ unzip "
                      "по паролю."]
             if self.delete_src.get():
                 lines.append("Исходные данные удалены.")
             self.status_text.set("Завершено")
             messagebox.showinfo(APP_NAME, "\n".join(lines))
+        elif kind == "stats":
+            _, seq, n, size = msg
+            if seq == self._stats_seq:
+                self.src_info.set(f"Папка · файлов {n} · {format_size(size)}")
         elif kind == "error":
             _, text = msg
             self._set_busy(False)
@@ -424,7 +578,7 @@ class RZServiceApp:
     def _about(self):
         messagebox.showinfo(
             APP_NAME,
-            f"{APP_NAME} v1.1\n\n"
+            f"{APP_NAME} v1.2\n\n"
             "Создание супер-защищённых архивов ZIP и RAR.\n\n"
             "Как это работает:\n"
             "• данные сжимаются в ZIP или RAR;\n"

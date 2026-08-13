@@ -8,7 +8,7 @@ from tkinter import filedialog, messagebox, ttk
 import customtkinter as ctk
 
 from rzservice import archive, crypto
-from rzservice.uiutil import format_date, format_size
+from rzservice.uiutil import format_date, format_size, resource_path
 
 APP_NAME = "RZ unzip"
 ACCENT = "#2f6bb0"
@@ -88,8 +88,15 @@ class RZUnzipApp:
         self.info_text = tk.StringVar(value="Файл не открыт")
 
         self._build_ui()
+        self._set_window_icon()
         self._center_window(980, 640)
         self.root.after(100, self._poll_queue)
+
+    def _set_window_icon(self):
+        try:
+            self.root.iconbitmap(resource_path("icon.ico"))
+        except Exception:
+            pass
 
     def _center_window(self, w, h):
         self.root.update_idletasks()
