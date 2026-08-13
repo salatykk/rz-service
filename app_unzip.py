@@ -435,7 +435,7 @@ class RZUnzipApp:
     def _about(self):
         messagebox.showinfo(
             APP_NAME,
-            f"{APP_NAME} v1.1\n\n"
+            f"{APP_NAME} v1.1 BETA\n\n"
             "Программа для открытия супер-защищённых архивов "
             "RZ Service (.rzx).\n\n"
             "Без ввода правильного пароля содержимое не может быть "

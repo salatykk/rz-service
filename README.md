@@ -125,13 +125,56 @@ RZ Service/
 ├── app_unzip.py           # интерфейс RZ unzip
 ├── icon.png               # иконка программы
 ├── convert_icon.py        # конвертация icon.png в icon.ico
-├── build.ps1              # полная сборка .exe
+├── build.ps1              # полная сборка .exe (Windows)
+├── make_secrets.ps1       # генерация секретов для GitHub Actions
+├── .github/workflows/     # автосборка на Windows/Linux/macOS
 └── requirements.txt       # зависимости
 ```
 
 > **Примечание.** Криптоядро (модули `crypto.py`, `archive.py`) и тест `selftest.py` намеренно не включены в публичный репозиторий — внутренний формат контейнера остаётся закрытым.
 
 ---
+
+## 🔄 Автосборка на Windows, Linux и macOS (GitHub Actions)
+
+PyInstaller не умеет кросс-компиляцию: исполняемый файл собирается только на своей операционной системе. Чтобы получать готовые версии для всех трёх платформ без покупки Linux/macOS-машин, в репозитории настроен workflow `.github/workflows/build.yml`.
+
+### Как это работает
+
+1. При создании тега `v*` (например `v1.1`) или вручную (`Actions → Build executables → Run workflow`) запускается сборка на трёх runner'ах: `windows-latest`, `ubuntu-latest`, `macos-latest`.
+2. Скрытое криптоядро **не хранится в репозитории** — оно восстанавливается из секретов GitHub прямо на runner'е прямо перед сборкой и попадает только в готовые бинарники.
+3. Все бинарники выкладываются во вкладку **Release**.
+
+### Настройка (один раз)
+
+1. Локально сгенерируйте секреты:
+
+   ```
+   powershell -File make_secrets.ps1
+   ```
+
+2. В репозитории на GitHub откройте **Settings → Secrets and variables → Actions → New repository secret** и добавьте три секрета из вывода скрипта:
+
+   | Имя секрета | Что содержит |
+   |---|---|
+   | `CRYPTO_PY` | `rzservice/crypto.py` (base64) |
+   | `ARCHIVE_PY` | `rzservice/archive.py` (base64) |
+   | `SELFTEST_PY` | `selftest.py` (base64) |
+
+3. Создайте тег и запустите сборку:
+
+   ```
+   git tag v1.1
+   git push origin v1.1
+   ```
+
+   Готовые файлы появятся в **Releases** (Windows: `.exe`, Linux/macOS: исполняемые файлы).
+
+### Примечания по Linux и macOS
+
+- **RAR-формат** требует установленного `rar`/WinRAR. На Linux/macOS он доступен только если установлен официальный `rar` CLI; без него программа корректно работает в режиме ZIP.
+- **macOS**: бинарник не подписан, поэтому при первом запуске macOS может блокировать его (`unidentified developer`). Разрешить: правый клик → **Открыть**, либо выполнить в терминале `xattr -dr com.apple.quarantine "RZ Service"`.
+- **Linux**: для запуска достаточно `python3-tk` на системе либо запуск из-под рабочего окружения с X11/Wayland.
 
 ## ❓ Частые вопросы
 

@@ -1,0 +1,145 @@
+name: Build executables
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            sep: ";"
+          - os: ubuntu-latest
+            sep: ":"
+          - os: macos-latest
+            sep: ":"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-venv python3-tk python3-pip
+
+      - name: Set up Python (Windows, macOS)
+        if: runner.os != 'Linux'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restore private crypto core from secrets
+        shell: bash
+        env:
+          CRYPTO_PY: ${{ secrets.CRYPTO_PY }}
+          ARCHIVE_PY: ${{ secrets.ARCHIVE_PY }}
+          SELFTEST_PY: ${{ secrets.SELFTEST_PY }}
+        run: |
+          set -e
+          if [ -z "$CRYPTO_PY" ] || [ -z "$ARCHIVE_PY" ] || [ -z "$SELFTEST_PY" ]; then
+            echo "::error::Secrets CRYPTO_PY, ARCHIVE_PY, SELFTEST_PY are not set."
+            echo "Generate them locally:  powershell -File make_secrets.ps1"
+            exit 1
+          fi
+          echo "$CRYPTO_PY" | base64 -d > rzservice/crypto.py
+          echo "$ARCHIVE_PY" | base64 -d > rzservice/archive.py
+          echo "$SELFTEST_PY" | base64 -d > selftest.py
+
+      - name: Create venv and install dependencies
+        shell: bash
+        run: |
+          set -e
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            PY=python
+          else
+            PY=python3
+          fi
+          $PY -m venv .venv
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            VP=".venv/Scripts/python.exe"
+          else
+            VP=".venv/bin/python"
+          fi
+          "$VP" -m pip install --upgrade pip
+          "$VP" -m pip install -r requirements.txt
+
+      - name: Prepare icons and run selftest
+        shell: bash
+        run: |
+          set -e
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            VP=".venv/Scripts/python.exe"
+          else
+            VP=".venv/bin/python"
+          fi
+          "$VP" convert_icon.py
+          "$VP" selftest.py
+
+      - name: Build RZ Service
+        shell: bash
+        run: |
+          set -e
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            VP=".venv/Scripts/python.exe"
+            ICON="--icon icon.ico"
+          else
+            VP=".venv/bin/python"
+            ICON=""
+          fi
+          "$VP" -m PyInstaller --noconfirm --clean --onefile --windowed \
+            --name "RZ Service" $ICON \
+            --add-data "icon.png${{ matrix.sep }}." \
+            --add-data "icon.ico${{ matrix.sep }}." \
+            app_service.py
+
+      - name: Build RZ unzip
+        shell: bash
+        run: |
+          set -e
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            VP=".venv/Scripts/python.exe"
+            ICON="--icon icon.ico"
+          else
+            VP=".venv/bin/python"
+            ICON=""
+          fi
+          "$VP" -m PyInstaller --noconfirm --clean --onefile --windowed \
+            --name "RZ unzip" $ICON \
+            --add-data "icon.png${{ matrix.sep }}." \
+            --add-data "icon.ico${{ matrix.sep }}." \
+            app_unzip.py
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rz-${{ matrix.os }}
+          path: dist/
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/rz-windows-latest/*
+            dist/rz-ubuntu-latest/*
+            dist/rz-macos-latest/*

@@ -578,7 +578,7 @@ class RZServiceApp:
     def _about(self):
         messagebox.showinfo(
             APP_NAME,
-            f"{APP_NAME} v1.2\n\n"
+            f"{APP_NAME} v1.1 BETA\n\n"
             "Создание супер-защищённых архивов ZIP и RAR.\n\n"
             "Как это работает:\n"
             "• данные сжимаются в ZIP или RAR;\n"
