@@ -1,0 +1,5 @@
+cryptography>=45.0.0
+customtkinter>=5.2.2
+rarfile>=4.2.0
+Pillow>=11.0.0
+pyinstaller>=6.16.0
